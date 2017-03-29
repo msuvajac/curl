@@ -1014,6 +1014,7 @@ static CURLcode operate_do(struct GlobalConfig *global,
           my_setopt_str(curl, CURLOPT_CAINFO, config->cacert);
         if(config->proxy_cacert)
           my_setopt_str(curl, CURLOPT_PROXY_CAINFO, config->proxy_cacert);
+
         if(config->capath) {
           result = res_setopt_str(curl, CURLOPT_CAPATH, config->capath);
           if(result == CURLE_NOT_BUILT_IN) {
@@ -1024,10 +1025,22 @@ static CURLcode operate_do(struct GlobalConfig *global,
           else if(result)
             goto show_error;
         }
-        if(config->proxy_capath)
-          my_setopt_str(curl, CURLOPT_PROXY_CAPATH, config->proxy_capath);
-        else if(config->capath) /* CURLOPT_PROXY_CAPATH default is capath */
-          my_setopt_str(curl, CURLOPT_PROXY_CAPATH, config->capath);
+        /* For the time being if --proxy-capath is not set then we use the
+           --capath value for it, if any. See #1257 */
+        if(config->proxy_capath || config->capath) {
+          result = res_setopt_str(curl, CURLOPT_PROXY_CAPATH,
+                                  (config->proxy_capath ?
+                                   config->proxy_capath :
+                                   config->capath));
+          if(result == CURLE_NOT_BUILT_IN) {
+            if(config->proxy_capath) {
+              warnf(config->global,
+                    "ignoring --proxy-capath, not supported by libcurl\n");
+            }
+          }
+          else if(result)
+            goto show_error;
+        }
 
         if(config->crlfile)
           my_setopt_str(curl, CURLOPT_CRLFILE, config->crlfile);
@@ -1622,7 +1635,7 @@ static CURLcode operate_do(struct GlobalConfig *global,
                   metalink_next_res = 1;
                   fprintf(global->errors,
                           "Metalink: fetching (%s) from (%s) FAILED "
-                          "(HTTP status code %d)\n",
+                          "(HTTP status code %ld)\n",
                           mlfile->filename, this_url, response);
                 }
               }
@@ -1678,8 +1691,13 @@ static CURLcode operate_do(struct GlobalConfig *global,
           fprintf(global->errors, "curl: (%d) %s\n", result, (errorbuffer[0]) ?
                   errorbuffer : curl_easy_strerror(result));
           if(result == CURLE_SSL_CACERT)
-            fprintf(global->errors, "%s%s",
-                    CURL_CA_CERT_ERRORMSG1, CURL_CA_CERT_ERRORMSG2);
+            fprintf(global->errors, "%s%s%s",
+                    CURL_CA_CERT_ERRORMSG1, CURL_CA_CERT_ERRORMSG2,
+                    ((config->proxy &&
+                      curl_strnequal(config->proxy, "https://", 8)) ?
+                     "HTTPS proxy has similar options --proxy-cacert "
+                     "and --proxy-insecure.\n" :
+                     ""));
         }
 
         /* Fall through comment to 'quit_urls' label */

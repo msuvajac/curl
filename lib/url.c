@@ -452,6 +452,7 @@ CURLcode Curl_close(struct Curl_easy *data)
   }
   data->change.url = NULL;
 
+  Curl_safefree(data->state.buffer);
   Curl_safefree(data->state.headerbuff);
 
   Curl_flush_cookies(data, 1);
@@ -576,14 +577,19 @@ CURLcode Curl_init_userdefined(struct UserDefined *set)
   result = setstropt(&set->str[STRING_SSL_CAFILE_ORIG], CURL_CA_BUNDLE);
   if(result)
     return result;
+
+  result = setstropt(&set->str[STRING_SSL_CAFILE_PROXY], CURL_CA_BUNDLE);
+  if(result)
+    return result;
 #endif
 #if defined(CURL_CA_PATH)
   result = setstropt(&set->str[STRING_SSL_CAPATH_ORIG], CURL_CA_PATH);
   if(result)
     return result;
 
-  result = setstropt(&set->str[STRING_SSL_CAPATH_PROXY],
-                     (char *) CURL_CA_PATH);
+  result = setstropt(&set->str[STRING_SSL_CAPATH_PROXY], CURL_CA_PATH);
+  if(result)
+    return result;
 #endif
 
   set->wildcardmatch  = FALSE;
@@ -641,6 +647,12 @@ CURLcode Curl_open(struct Curl_easy **curl)
 
   /* We do some initial setup here, all those fields that can't be just 0 */
 
+  data->state.buffer = malloc(BUFSIZE + 1);
+  if(!data->state.buffer) {
+    DEBUGF(fprintf(stderr, "Error: malloc of buffer failed\n"));
+    result = CURLE_OUT_OF_MEMORY;
+  }
+
   data->state.headerbuff = malloc(HEADERSIZE);
   if(!data->state.headerbuff) {
     DEBUGF(fprintf(stderr, "Error: malloc of headerbuff failed\n"));
@@ -671,6 +683,7 @@ CURLcode Curl_open(struct Curl_easy **curl)
 
   if(result) {
     Curl_resolver_cleanup(data->state.resolver);
+    free(data->state.buffer);
     free(data->state.headerbuff);
     Curl_freeset(data);
     free(data);
@@ -2217,8 +2230,12 @@ CURLcode Curl_setopt(struct Curl_easy *data, CURLoption option,
     /* This does not work on windows. */
     result = setstropt(&data->set.str[STRING_SSL_CAPATH_ORIG],
                        va_arg(param, char *));
+#else
+    result = CURLE_NOT_BUILT_IN;
+#endif
     break;
   case CURLOPT_PROXY_CAPATH:
+#ifdef have_curlssl_ca_path /* not supported by all backends */
     /*
      * Set CA path info for SSL connection proxy. Specify directory name of the
      * CA certificates which have been prepared using openssl c_rehash utility.
@@ -2268,9 +2285,20 @@ CURLcode Curl_setopt(struct Curl_easy *data, CURLoption option,
      */
     data->set.buffer_size = va_arg(param, long);
 
-    if((data->set.buffer_size> (BUFSIZE -1)) ||
-       (data->set.buffer_size < 1))
-      data->set.buffer_size = 0; /* huge internal default */
+    if(data->set.buffer_size > MAX_BUFSIZE)
+      data->set.buffer_size = MAX_BUFSIZE; /* huge internal default */
+    else if(data->set.buffer_size < 1)
+      data->set.buffer_size = BUFSIZE;
+
+    /* Resize only if larger than default buffer size. */
+    if(data->set.buffer_size > BUFSIZE) {
+      data->state.buffer = realloc(data->state.buffer,
+                                   data->set.buffer_size + 1);
+      if(!data->state.buffer) {
+        DEBUGF(fprintf(stderr, "Error: realloc of buffer failed\n"));
+        result = CURLE_OUT_OF_MEMORY;
+      }
+    }
 
     break;
 
@@ -3035,7 +3063,6 @@ CURLcode Curl_disconnect(struct connectdata *conn, bool dead_connection)
 
   free_fixed_hostname(&conn->host);
   free_fixed_hostname(&conn->conn_to_host);
-  free_fixed_hostname(&conn->proxy);
   free_fixed_hostname(&conn->http_proxy.host);
   free_fixed_hostname(&conn->socks_proxy.host);
 
@@ -3412,19 +3439,14 @@ ConnectionExists(struct Curl_easy *data,
       max_pipeline_length(data->multi):0;
     size_t best_pipe_len = max_pipe_len;
     struct curl_llist_element *curr;
-    const char *hostname;
-
-    if(needle->bits.conn_to_host)
-      hostname = needle->conn_to_host.name;
-    else
-      hostname = needle->host.name;
 
     infof(data, "Found bundle for host %s: %p [%s]\n",
-          hostname, (void *)bundle,
-          (bundle->multiuse== BUNDLE_PIPELINING?
-           "can pipeline":
-           (bundle->multiuse== BUNDLE_MULTIPLEX?
-            "can multiplex":"serially")));
+          (needle->bits.conn_to_host ? needle->conn_to_host.name :
+           needle->host.name), (void *)bundle,
+          (bundle->multiuse == BUNDLE_PIPELINING ?
+           "can pipeline" :
+           (bundle->multiuse == BUNDLE_MULTIPLEX ?
+            "can multiplex" : "serially")));
 
     /* We can't pipe if we don't know anything about the server */
     if(canPipeline) {
@@ -3805,17 +3827,19 @@ CURLcode Curl_connected_proxy(struct connectdata *conn, int sockindex)
 
   if(conn->bits.socksproxy) {
 #ifndef CURL_DISABLE_PROXY
-    const char * const host = conn->bits.conn_to_host ?
-                              conn->conn_to_host.name :
-                              conn->bits.httpproxy ?
+    /* for the secondary socket (FTP), use the "connect to host"
+     * but ignore the "connect to port" (use the secondary port)
+     */
+    const char * const host = conn->bits.httpproxy ?
                               conn->http_proxy.host.name :
+                              conn->bits.conn_to_host ?
+                              conn->conn_to_host.name :
                               sockindex == SECONDARYSOCKET ?
                               conn->secondaryhostname : conn->host.name;
-    const int port = conn->bits.conn_to_port ? conn->conn_to_port :
-                     conn->bits.httpproxy ?
-                     (int)conn->http_proxy.port :
-                     sockindex == SECONDARYSOCKET ?
-                      conn->secondary_port : conn->remote_port;
+    const int port = conn->bits.httpproxy ? (int)conn->http_proxy.port :
+                     sockindex == SECONDARYSOCKET ? conn->secondary_port :
+                     conn->bits.conn_to_port ? conn->conn_to_port :
+                     conn->remote_port;
     conn->bits.socksproxy_connecting = TRUE;
     switch(conn->socks_proxy.proxytype) {
     case CURLPROXY_SOCKS5:
@@ -3853,7 +3877,8 @@ void Curl_verboseconnect(struct connectdata *conn)
     infof(conn->data, "Connected to %s (%s) port %ld (#%ld)\n",
           conn->bits.socksproxy ? conn->socks_proxy.host.dispname :
           conn->bits.httpproxy ? conn->http_proxy.host.dispname :
-                             conn->host.dispname,
+          conn->bits.conn_to_host ? conn->conn_to_host.dispname :
+          conn->host.dispname,
           conn->ip_addr_str, conn->port, conn->connection_id);
 }
 #endif
@@ -4100,7 +4125,7 @@ static struct connectdata *allocate_conn(struct Curl_easy *data)
   conn->tempsock[1] = CURL_SOCKET_BAD; /* no file descriptor */
   conn->connection_id = -1;    /* no ID */
   conn->port = -1; /* unknown at this point */
-  conn->remote_port = -1; /* unknown */
+  conn->remote_port = -1; /* unknown at this point */
 #if defined(USE_RECV_BEFORE_SEND_WORKAROUND) && defined(DEBUGBUILD)
   conn->postponed[0].bindsock = CURL_SOCKET_BAD; /* no file descriptor */
   conn->postponed[1].bindsock = CURL_SOCKET_BAD; /* no file descriptor */
@@ -4157,8 +4182,11 @@ static struct connectdata *allocate_conn(struct Curl_easy *data)
   conn->bits.ftp_use_epsv = data->set.ftp_use_epsv;
   conn->bits.ftp_use_eprt = data->set.ftp_use_eprt;
 
+  conn->ssl_config.verifystatus = data->set.ssl.primary.verifystatus;
   conn->ssl_config.verifypeer = data->set.ssl.primary.verifypeer;
   conn->ssl_config.verifyhost = data->set.ssl.primary.verifyhost;
+  conn->proxy_ssl_config.verifystatus =
+    data->set.proxy_ssl.primary.verifystatus;
   conn->proxy_ssl_config.verifypeer = data->set.proxy_ssl.primary.verifypeer;
   conn->proxy_ssl_config.verifyhost = data->set.proxy_ssl.primary.verifyhost;
 
@@ -4280,6 +4308,7 @@ static CURLcode parseurlandfillconn(struct Curl_easy *data,
   CURLcode result;
   bool rebuild_url = FALSE;
   bool url_has_scheme = FALSE;
+  char protobuf[16];
 
   *prot_missing = FALSE;
 
@@ -4409,7 +4438,6 @@ static CURLcode parseurlandfillconn(struct Curl_easy *data,
   }
   else {
     /* clear path */
-    char protobuf[16];
     char slashbuf[4];
     path[0]=0;
 
@@ -4599,6 +4627,10 @@ static CURLcode parseurlandfillconn(struct Curl_easy *data,
     data->change.url_alloc = TRUE; /* free this later */
   }
 
+  result = findprotocol(data, conn, protop);
+  if(result)
+    return result;
+
   /*
    * Parse the login details from the URL and strip them out of
    * the host name
@@ -4685,8 +4717,7 @@ static CURLcode parseurlandfillconn(struct Curl_easy *data,
    *   conn->host.name is B
    *   data->state.path is /C
    */
-
-  return findprotocol(data, conn, protop);
+  return CURLE_OK;
 }
 
 /*
@@ -5192,6 +5223,7 @@ static CURLcode parse_url_login(struct Curl_easy *data,
   DEBUGASSERT(!**user);
   DEBUGASSERT(!**passwd);
   DEBUGASSERT(!**options);
+  DEBUGASSERT(conn->handler);
 
   if(!ptr)
     goto out;
@@ -5210,9 +5242,12 @@ static CURLcode parse_url_login(struct Curl_easy *data,
   if(data->set.use_netrc == CURL_NETRC_REQUIRED)
     goto out;
 
-  /* We could use the login information in the URL so extract it */
+  /* We could use the login information in the URL so extract it. Only parse
+     options if the handler says we should. */
   result = parse_login_details(login, ptr - login - 1,
-                               &userp, &passwdp, &optionsp);
+                               &userp, &passwdp,
+                               (conn->handler->flags & PROTOPT_URLOPTIONS)?
+                               &optionsp:NULL);
   if(result)
     goto out;
 
@@ -5639,6 +5674,10 @@ static CURLcode parse_connect_to_host_port(struct Curl_easy *data,
   char *portptr;
   int port = -1;
 
+#if defined(CURL_DISABLE_VERBOSE_STRINGS)
+  (void) data;
+#endif
+
   *hostname_result = NULL;
   *port_result = -1;
 
@@ -5804,14 +5843,11 @@ static CURLcode parse_connect_to_slist(struct Curl_easy *data,
       return result;
 
     if(host && *host) {
-      bool ipv6host;
       conn->conn_to_host.rawalloc = host;
       conn->conn_to_host.name = host;
       conn->bits.conn_to_host = TRUE;
 
-      ipv6host = strchr(host, ':') != NULL;
-      infof(data, "Connecting to hostname: %s%s%s\n",
-            ipv6host ? "[" : "", host, ipv6host ? "]" : "");
+      infof(data, "Connecting to hostname: %s\n", host);
     }
     else {
       /* no "connect to host" */
@@ -5903,7 +5939,7 @@ static CURLcode resolve_server(struct Curl_easy *data,
       if(conn->bits.conn_to_port)
         conn->port = conn->conn_to_port;
       else
-        conn->port = conn->remote_port; /* it is the same port */
+        conn->port = conn->remote_port;
 
       /* Resolve target host right on */
       rc = Curl_resolv_timeout(conn, connhost->name, (int)conn->port,
@@ -5959,11 +5995,9 @@ static void reuse_conn(struct connectdata *old_conn,
 {
   free_fixed_hostname(&old_conn->http_proxy.host);
   free_fixed_hostname(&old_conn->socks_proxy.host);
-  free_fixed_hostname(&old_conn->proxy);
 
   free(old_conn->http_proxy.host.rawalloc);
   free(old_conn->socks_proxy.host.rawalloc);
-  free(old_conn->proxy.rawalloc);
 
   /* free the SSL config struct from this connection struct as this was
      allocated in vain and is targeted for destruction */
@@ -6410,12 +6444,14 @@ static CURLcode create_conn(struct Curl_easy *data,
   fix_hostname(conn, &conn->host);
   if(conn->bits.conn_to_host)
     fix_hostname(conn, &conn->conn_to_host);
-  if(conn->proxy.name && *conn->proxy.name)
-    fix_hostname(conn, &conn->proxy);
+  if(conn->bits.httpproxy)
+    fix_hostname(conn, &conn->http_proxy.host);
+  if(conn->bits.socksproxy)
+    fix_hostname(conn, &conn->socks_proxy.host);
 
   /*************************************************************
    * Check whether the host and the "connect to host" are equal.
-   * Do this after the hostnames have been IDN-fixed .
+   * Do this after the hostnames have been IDN-fixed.
    *************************************************************/
   if(conn->bits.conn_to_host &&
      strcasecompare(conn->conn_to_host.name, conn->host.name)) {

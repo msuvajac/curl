@@ -24,7 +24,7 @@ Sets the proxy server to use if no protocol-specific proxy is set.
 list of host names that shouldn't go through any proxy. If set to a asterisk
 \&'*' only, it matches all hosts.
 
-Since 7.52.2, this environment variable disable the proxy even if specify
+Since 7.53.0, this environment variable disable the proxy even if specify
 --proxy option. That is
 .B NO_PROXY=direct.example.com curl -x http://proxy.example.com
 .B http://direct.example.com
@@ -239,8 +239,6 @@ Daniel Stenberg is the main author, but the whole list of contributors is
 found in the separate THANKS file.
 .SH WWW
 https://curl.haxx.se
-.SH FTP
-ftp://ftp.sunet.se/pub/www/utilities/curl/
 .SH "SEE ALSO"
 .BR ftp (1),
 .BR wget (1)

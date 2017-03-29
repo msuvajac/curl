@@ -297,7 +297,8 @@ static CURLcode http_output_basic(struct connectdata *conn, bool proxy)
     pwd = conn->passwd;
   }
 
-  snprintf(data->state.buffer, sizeof(data->state.buffer), "%s:%s", user, pwd);
+  snprintf(data->state.buffer, CURL_BUFSIZE(data->set.buffer_size),
+           "%s:%s", user, pwd);
 
   result = Curl_base64_encode(data,
                               data->state.buffer, strlen(data->state.buffer),
@@ -2511,7 +2512,7 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
       postsize = data->state.infilesize;
 
     if((postsize != -1) && !data->req.upload_chunky &&
-       !Curl_checkheaders(conn, "Content-Length:")) {
+       (conn->bits.authneg || !Curl_checkheaders(conn, "Content-Length:"))) {
       /* only add Content-Length if not uploading chunked */
       result = Curl_add_bufferf(req_buffer,
                                 "Content-Length: %" CURL_FORMAT_CURL_OFF_T
@@ -2563,7 +2564,7 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
        we don't upload data chunked, as RFC2616 forbids us to set both
        kinds of headers (Transfer-Encoding: chunked and Content-Length) */
     if((postsize != -1) && !data->req.upload_chunky &&
-       !Curl_checkheaders(conn, "Content-Length:")) {
+       (conn->bits.authneg || !Curl_checkheaders(conn, "Content-Length:"))) {
       /* we allow replacing this header if not during auth negotiation,
          although it isn't very wise to actually set your own */
       result = Curl_add_bufferf(req_buffer,
