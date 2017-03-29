@@ -5,11 +5,11 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2015, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 1998 - 2016, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
- * are also available at http://curl.haxx.se/docs/copyright.html.
+ * are also available at https://curl.haxx.se/docs/copyright.html.
  *
  * You may opt to use, copy, modify, merge, publish, distribute and/or sell
  * copies of the Software, and permit persons to whom the Software is
@@ -69,7 +69,7 @@ int parseconfig(const char *filename, struct GlobalConfig *global)
         /* Check if the file exists - if not, try CURLRC in the same
          * directory as our executable
          */
-        file = fopen(filebuffer, "r");
+        file = fopen(filebuffer, FOPEN_READTEXT);
         if(file != NULL) {
           fclose(file);
           filename = filebuffer;
@@ -115,7 +115,7 @@ int parseconfig(const char *filename, struct GlobalConfig *global)
   }
 
   if(strcmp(filename, "-"))
-    file = fopen(filename, "r");
+    file = fopen(filename, FOPEN_READTEXT);
   else
     file = stdin;
 
@@ -187,33 +187,32 @@ int parseconfig(const char *filename, struct GlobalConfig *global)
         param = line; /* parameter starts here */
         while(*line && !ISSPACE(*line))
           line++;
-        *line = '\0'; /* zero terminate */
 
-        /* to detect mistakes better, see if there's data following */
-        line++;
-        /* pass all spaces */
-        while(*line && ISSPACE(*line))
+        if(*line) {
+          *line = '\0'; /* zero terminate */
+
+          /* to detect mistakes better, see if there's data following */
           line++;
+          /* pass all spaces */
+          while(*line && ISSPACE(*line))
+            line++;
 
-        switch(*line) {
-        case '\0':
-        case '\r':
-        case '\n':
-        case '#': /* comment */
-          break;
-        default:
-          warnf(operation->global, "%s:%d: warning: '%s' uses unquoted white "
-                "space in the line that may cause side-effects!\n",
-                filename, lineno, option);
+          switch(*line) {
+          case '\0':
+          case '\r':
+          case '\n':
+          case '#': /* comment */
+            break;
+          default:
+            warnf(operation->global, "%s:%d: warning: '%s' uses unquoted "
+                  "white space in the line that may cause side-effects!\n",
+                  filename, lineno, option);
+          }
         }
-      }
-
-      if(!*param) {
-        /* do this so getparameter can check for required parameters.
-           Otherwise it always thinks there's a parameter. */
-        if(alloced_param)
-          Curl_safefree(param);
-        param = NULL;
+        if(!*param)
+          /* do this so getparameter can check for required parameters.
+             Otherwise it always thinks there's a parameter. */
+          param = NULL;
       }
 
 #ifdef DEBUG_CONFIG

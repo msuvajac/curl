@@ -5,11 +5,11 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2015, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 1998 - 2016, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
- * are also available at http://curl.haxx.se/docs/copyright.html.
+ * are also available at https://curl.haxx.se/docs/copyright.html.
  *
  * You may opt to use, copy, modify, merge, publish, distribute and/or sell
  * copies of the Software, and permit persons to whom the Software is
@@ -24,15 +24,16 @@
 
 #ifndef CURL_DISABLE_CRYPTO_AUTH
 
+#include <curl/curl.h>
+
 #include "curl_md5.h"
 #include "curl_hmac.h"
 #include "warnless.h"
 
-#include "curl_memory.h"
-
 #if defined(USE_GNUTLS_NETTLE)
 
 #include <nettle/md5.h>
+#include "curl_memory.h"
 /* The last #include file should be: */
 #include "memdebug.h"
 
@@ -44,7 +45,7 @@ static void MD5_Init(MD5_CTX * ctx)
 }
 
 static void MD5_Update(MD5_CTX * ctx,
-                       const unsigned char * input,
+                       const unsigned char *input,
                        unsigned int inputLen)
 {
   md5_update(ctx, inputLen, input);
@@ -58,6 +59,7 @@ static void MD5_Final(unsigned char digest[16], MD5_CTX * ctx)
 #elif defined(USE_GNUTLS)
 
 #include <gcrypt.h>
+#include "curl_memory.h"
 /* The last #include file should be: */
 #include "memdebug.h"
 
@@ -69,7 +71,7 @@ static void MD5_Init(MD5_CTX * ctx)
 }
 
 static void MD5_Update(MD5_CTX * ctx,
-                       const unsigned char * input,
+                       const unsigned char *input,
                        unsigned int inputLen)
 {
   gcry_md_write(*ctx, input, inputLen);
@@ -84,6 +86,9 @@ static void MD5_Final(unsigned char digest[16], MD5_CTX * ctx)
 #elif defined(USE_OPENSSL)
 /* When OpenSSL is available we use the MD5-function from OpenSSL */
 #include <openssl/md5.h>
+#include "curl_memory.h"
+/* The last #include file should be: */
+#include "memdebug.h"
 
 #elif (defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && \
               (__MAC_OS_X_VERSION_MAX_ALLOWED >= 1040)) || \
@@ -98,6 +103,9 @@ static void MD5_Final(unsigned char digest[16], MD5_CTX * ctx)
    reliable than defining COMMON_DIGEST_FOR_OPENSSL on older cats. */
 #  include <CommonCrypto/CommonDigest.h>
 #  define MD5_CTX CC_MD5_CTX
+#include "curl_memory.h"
+/* The last #include file should be: */
+#include "memdebug.h"
 
 static void MD5_Init(MD5_CTX *ctx)
 {
@@ -116,9 +124,12 @@ static void MD5_Final(unsigned char digest[16], MD5_CTX *ctx)
   CC_MD5_Final(digest, ctx);
 }
 
-#elif defined(_WIN32)
+#elif defined(_WIN32) && !defined(CURL_WINDOWS_APP)
 
 #include <wincrypt.h>
+#include "curl_memory.h"
+/* The last #include file should be: */
+#include "memdebug.h"
 
 typedef struct {
   HCRYPTPROV hCryptProv;
@@ -156,6 +167,9 @@ static void MD5_Final(unsigned char digest[16], MD5_CTX *ctx)
 #include <axTLS/config.h>
 #include <axTLS/os_int.h>
 #include <axTLS/crypto.h>
+#include "curl_memory.h"
+/* The last #include file should be: */
+#include "memdebug.h"
 #else
 /* When no other crypto library is available we use this code segment */
 /*
@@ -196,6 +210,10 @@ static void MD5_Final(unsigned char digest[16], MD5_CTX *ctx)
  */
 
 #include <string.h>
+
+/* The last #include files should be: */
+#include "curl_memory.h"
+#include "memdebug.h"
 
 /* Any 32-bit or wider unsigned integer data type will do */
 typedef unsigned int MD5_u32plus;
@@ -384,7 +402,8 @@ static void MD5_Update(MD5_CTX *ctx, const void *data, unsigned long size)
   unsigned long used, available;
 
   saved_lo = ctx->lo;
-  if((ctx->lo = (saved_lo + size) & 0x1fffffff) < saved_lo)
+  ctx->lo = (saved_lo + size) & 0x1fffffff;
+  if(ctx->lo < saved_lo)
     ctx->hi++;
   ctx->hi += (MD5_u32plus)size >> 29;
 
@@ -464,9 +483,6 @@ static void MD5_Final(unsigned char *result, MD5_CTX *ctx)
 }
 
 #endif /* CRYPTO LIBS */
-
-/* The last #include file should be: */
-#include "memdebug.h"
 
 const HMAC_params Curl_HMAC_MD5[] = {
   {

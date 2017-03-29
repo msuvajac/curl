@@ -9,7 +9,7 @@
 .\" *
 .\" * This software is licensed as described in the file COPYING, which
 .\" * you should have received as part of this distribution. The terms
-.\" * are also available at http://curl.haxx.se/docs/copyright.html.
+.\" * are also available at https://curl.haxx.se/docs/copyright.html.
 .\" *
 .\" * You may opt to use, copy, modify, merge, publish, distribute and/or sell
 .\" * copies of the Software, and permit persons to whom the Software is
@@ -34,6 +34,9 @@ set to any non-NULL value, libcurl will return \fICURLE_RTSP_SESSION_ERROR\fP
 if ID received from the server does not match. If unset (or set to NULL),
 libcurl will automatically set the ID the first time the server sets it in a
 response.
+
+The application does not have to keep the string around after setting this
+option.
 .SH DEFAULT
 NULL
 .SH PROTOCOLS

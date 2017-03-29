@@ -8,11 +8,11 @@
  *                             \___|\___/|_| \_\_____|
  *
  * Copyright (C) 2012 - 2014, Nick Zitzmann, <nickzman@gmail.com>.
- * Copyright (C) 2012 - 2015, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 2012 - 2017, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
- * are also available at http://curl.haxx.se/docs/copyright.html.
+ * are also available at https://curl.haxx.se/docs/copyright.html.
  *
  * You may opt to use, copy, modify, merge, publish, distribute and/or sell
  * copies of the Software, and permit persons to whom the Software is
@@ -42,12 +42,13 @@ int Curl_darwinssl_check_cxn(struct connectdata *conn);
 bool Curl_darwinssl_data_pending(const struct connectdata *conn,
                                  int connindex);
 
-int Curl_darwinssl_random(unsigned char *entropy,
-                          size_t length);
+CURLcode Curl_darwinssl_random(unsigned char *entropy,
+                               size_t length);
 void Curl_darwinssl_md5sum(unsigned char *tmp, /* input */
                            size_t tmplen,
                            unsigned char *md5sum, /* output */
                            size_t md5len);
+bool Curl_darwinssl_false_start(void);
 
 /* Set the API backend definition to SecureTransport */
 #define CURL_SSL_BACKEND CURLSSLBACKEND_DARWINSSL
@@ -69,6 +70,7 @@ void Curl_darwinssl_md5sum(unsigned char *tmp, /* input */
 #define curlssl_data_pending(x,y) Curl_darwinssl_data_pending(x, y)
 #define curlssl_random(x,y,z) ((void)x, Curl_darwinssl_random(y,z))
 #define curlssl_md5sum(a,b,c,d) Curl_darwinssl_md5sum(a,b,c,d)
+#define curlssl_false_start() Curl_darwinssl_false_start()
 
 #endif /* USE_DARWINSSL */
 #endif /* HEADER_CURL_DARWINSSL_H */
